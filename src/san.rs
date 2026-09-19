@@ -3,7 +3,7 @@ use crate::board::{Board, Color, Piece, PieceKind};
 // Applies one SAN token (e.g. "Nbd7", "exd5", "e8=Q", "O-O") to the board.
 // This trusts the input the way a real PGN export can be trusted: it finds
 // the one piece that could reach the stated square and moves it, without
-// re-deriving check legality. En passant capture is not recognized yet.
+// re-deriving check legality.
 pub fn apply_san(board: &mut Board, raw: &str) -> Result<(), String> {
     let token = raw.trim_end_matches(|c| matches!(c, '+' | '#' | '!' | '?'));
     let color = board.turn;
@@ -131,7 +131,9 @@ fn can_reach(
             let dir = if color == Color::White { 1 } else { -1 };
             let start_rank = if color == Color::White { 1 } else { 6 };
             if is_capture {
-                dr == dir && df.abs() == 1
+                dr == dir
+                    && df.abs() == 1
+                    && (board.squares[to.1][to.0].is_some() || Some(to) == board.en_passant)
             } else if df != 0 {
                 false
             } else if dr == dir {
@@ -180,7 +182,11 @@ fn move_piece(
     promotion: Option<PieceKind>,
     is_capture: bool,
 ) {
-    let captured = board.squares[to.1][to.0].take();
+    let mut captured = board.squares[to.1][to.0].take();
+    if kind == PieceKind::Pawn && is_capture && captured.is_none() && Some(to) == board.en_passant {
+        // the captured pawn sits beside the mover, not on the destination square
+        captured = board.squares[from.1][to.0].take();
+    }
     let final_kind = promotion.unwrap_or(kind);
     board.squares[to.1][to.0] = Some(Piece { kind: final_kind, color });
     board.squares[from.1][from.0] = None;

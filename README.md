@@ -52,7 +52,6 @@ notation refers to.
 
 ## Known limitations
 
-- En passant captures are not recognized.
 - Move legality with respect to check is not verified.
 - Only single-game plain movetext is read; PGN tag pairs (`[Event "..."]`
   etc.) are not stripped, so a file with headers needs those lines
