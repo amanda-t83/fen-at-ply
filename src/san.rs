@@ -1,9 +1,10 @@
 use crate::board::{Board, Color, Piece, PieceKind};
 
 // Applies one SAN token (e.g. "Nbd7", "exd5", "e8=Q", "O-O") to the board.
-// This trusts the input the way a real PGN export can be trusted: it finds
-// the one piece that could reach the stated square and moves it, without
-// re-deriving check legality.
+// Finds every piece that could reach the stated square by movement rules,
+// then narrows that down to the ones that don't leave the mover's own king
+// in check (and, for castling, that don't castle out of, through, or into
+// check).
 pub fn apply_san(board: &mut Board, raw: &str) -> Result<(), String> {
     let token = raw.trim_end_matches(|c| matches!(c, '+' | '#' | '!' | '?'));
     let color = board.turn;
@@ -51,8 +52,16 @@ pub fn apply_san(board: &mut Board, raw: &str) -> Result<(), String> {
         }
     }
 
-    let source = find_source(board, kind, color, dest, dis_file, dis_rank, is_capture)
-        .ok_or_else(|| format!("no unambiguous source found for '{}'", raw))?;
+    let candidates = find_sources(board, kind, color, dest, dis_file, dis_rank, is_capture);
+    let legal: Vec<(usize, usize)> = candidates
+        .into_iter()
+        .filter(|&src| !leaves_king_in_check(board, src, dest, kind, color, promotion, is_capture))
+        .collect();
+    let source = match legal.len() {
+        0 => return Err(format!("no legal source found for '{}'", raw)),
+        1 => legal[0],
+        _ => return Err(format!("ambiguous move '{}'", raw)),
+    };
 
     move_piece(board, source, dest, kind, color, promotion, is_capture);
     Ok(())
@@ -76,7 +85,7 @@ fn square(file_char: char, rank_char: char) -> Result<(usize, usize), String> {
     Ok(((file_char as u8 - b'a') as usize, (rank_char as u8 - b'1') as usize))
 }
 
-fn find_source(
+fn find_sources(
     board: &Board,
     kind: PieceKind,
     color: Color,
@@ -84,8 +93,8 @@ fn find_source(
     dis_file: Option<usize>,
     dis_rank: Option<usize>,
     is_capture: bool,
-) -> Option<(usize, usize)> {
-    let mut found = None;
+) -> Vec<(usize, usize)> {
+    let mut found = Vec::new();
     for rank in 0..8 {
         for file in 0..8 {
             match board.squares[rank][file] {
@@ -103,14 +112,87 @@ fn find_source(
                 }
             }
             if can_reach(board, (file, rank), dest, kind, color, is_capture) {
-                if found.is_some() {
-                    return None;
-                }
-                found = Some((file, rank));
+                found.push((file, rank));
             }
         }
     }
     found
+}
+
+// Plays the candidate move on a scratch copy of the board and reports
+// whether the mover's own king ends up attacked. SAN disambiguation only
+// has to pick between pieces that could reach the square by movement
+// rules; this is what narrows that down to actually-legal moves.
+fn leaves_king_in_check(
+    board: &Board,
+    from: (usize, usize),
+    to: (usize, usize),
+    kind: PieceKind,
+    color: Color,
+    promotion: Option<PieceKind>,
+    is_capture: bool,
+) -> bool {
+    let mut scratch = board.clone();
+    move_piece(&mut scratch, from, to, kind, color, promotion, is_capture);
+    match king_square(&scratch, color) {
+        Some(sq) => is_attacked(&scratch, sq, color.opposite()),
+        None => false,
+    }
+}
+
+fn king_square(board: &Board, color: Color) -> Option<(usize, usize)> {
+    for rank in 0..8 {
+        for file in 0..8 {
+            if let Some(p) = board.squares[rank][file] {
+                if p.kind == PieceKind::King && p.color == color {
+                    return Some((file, rank));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn is_attacked(board: &Board, square: (usize, usize), by_color: Color) -> bool {
+    for rank in 0..8 {
+        for file in 0..8 {
+            match board.squares[rank][file] {
+                Some(p) if p.color == by_color => {
+                    if attacks(board, (file, rank), square, p.kind) {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    false
+}
+
+// Attack pattern for a piece, as opposed to can_reach's move pattern: a
+// pawn threatens its diagonals whether or not anything sits there, and
+// there's no such thing as en passant or "square must be empty" here.
+fn attacks(board: &Board, from: (usize, usize), to: (usize, usize), kind: PieceKind) -> bool {
+    let (ff, fr) = (from.0 as i32, from.1 as i32);
+    let (tf, tr) = (to.0 as i32, to.1 as i32);
+    let df = tf - ff;
+    let dr = tr - fr;
+
+    match kind {
+        PieceKind::Pawn => {
+            let color = board.squares[from.1][from.0].expect("attacker square is occupied").color;
+            let dir = if color == Color::White { 1 } else { -1 };
+            df.abs() == 1 && dr == dir
+        }
+        PieceKind::Knight => matches!((df.abs(), dr.abs()), (1, 2) | (2, 1)),
+        PieceKind::King => df.abs() <= 1 && dr.abs() <= 1 && (df != 0 || dr != 0),
+        PieceKind::Bishop => df.abs() == dr.abs() && df != 0 && path_clear(board, from, to),
+        PieceKind::Rook => ((df == 0) != (dr == 0)) && path_clear(board, from, to),
+        PieceKind::Queen => {
+            (((df == 0) != (dr == 0)) || (df.abs() == dr.abs() && df != 0))
+                && path_clear(board, from, to)
+        }
+    }
 }
 
 fn can_reach(
@@ -242,6 +324,11 @@ fn castle(board: &mut Board, color: Color, kingside: bool) -> Result<(), String>
     };
     if !allowed {
         return Err("castling not available".to_string());
+    }
+    let attacker = color.opposite();
+    let king_path = if kingside { [4, 5, 6] } else { [4, 3, 2] };
+    if king_path.iter().any(|&file| is_attacked(board, (file, rank), attacker)) {
+        return Err("cannot castle out of, through, or into check".to_string());
     }
     let king = Piece { kind: PieceKind::King, color };
     let rook = Piece { kind: PieceKind::Rook, color };

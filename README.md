@@ -40,19 +40,17 @@ r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4
 
 The board is a plain 8x8 array. Applying a SAN token means parsing out
 the piece letter, disambiguation, capture flag, destination square, and
-promotion, then scanning the board for the one piece of that kind and
-color that could legally reach the destination given normal piece
-movement (sliding pieces check that the path is clear). If more than one
-piece matches, or none do, the move is rejected instead of guessed at.
-
-The parser trusts the input the way a real PGN export can be trusted:
-it does not verify that a move is legal in the sense of not leaving the
-mover's own king in check. It just needs to know which piece the
-notation refers to.
+promotion, then scanning the board for every piece of that kind and
+color that could reach the destination given normal piece movement
+(sliding pieces check that the path is clear). Each candidate is then
+played on a scratch copy of the board to confirm it doesn't leave the
+mover's own king in check; castling additionally checks that the king
+isn't in check before, during, or after the move. If more than one
+candidate survives, or none do, the move is rejected instead of guessed
+at.
 
 ## Known limitations
 
-- Move legality with respect to check is not verified.
 - Only single-game plain movetext is read; PGN tag pairs (`[Event "..."]`
   etc.) are not stripped, so a file with headers needs those lines
   removed first.

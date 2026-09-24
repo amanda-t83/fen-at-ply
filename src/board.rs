@@ -49,6 +49,7 @@ impl Piece {
 
 // squares[rank][file], rank 0 = "1", file 0 = "a". Coordinates elsewhere in
 // this crate are (file, rank) tuples, matching how SAN reads (letter, digit).
+#[derive(Clone)]
 pub struct Board {
     pub squares: [[Option<Piece>; 8]; 8],
     pub turn: Color,
