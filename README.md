@@ -49,11 +49,15 @@ isn't in check before, during, or after the move. If more than one
 candidate survives, or none do, the move is rejected instead of guessed
 at.
 
+Full PGN files work too: tag pair lines (`[Event "..."]`, `[Site "..."]`,
+etc.) are dropped before the movetext is read, and if the file holds more
+than one game, only the first one's moves are played. See
+`examples/ruy-lopez.pgn` for a file with headers and a second game.
+
 ## Known limitations
 
-- Only single-game plain movetext is read; PGN tag pairs (`[Event "..."]`
-  etc.) are not stripped, so a file with headers needs those lines
-  removed first.
+- Comments in `{braces}` and NAGs (`$1`) are not stripped, so exports that
+  include them need to be cleaned up first.
 
 ## License
 

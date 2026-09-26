@@ -24,7 +24,8 @@ fn main() {
     };
 
     let ply_limit = args.get(2).and_then(|s| s.parse::<usize>().ok());
-    let moves = tokenize(&text);
+    let movetext = strip_tag_pairs(&text);
+    let moves = tokenize(&movetext);
     let limit = ply_limit.unwrap_or(moves.len());
 
     let mut board = Board::start();
@@ -41,14 +42,33 @@ fn main() {
     println!("{}", board.to_fen());
 }
 
+// A PGN tag pair is a whole line like `[Event "F.I.D.E. World Cup"]`. The
+// quoted value can contain spaces, so these have to be dropped a line at a
+// time rather than as whitespace-delimited tokens like the movetext is.
+fn strip_tag_pairs(text: &str) -> String {
+    text.lines()
+        .filter(|line| !line.trim_start().starts_with('['))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 // Move numbers ("1.") and result markers are expected as separate
-// whitespace-delimited tokens, matching standard PGN export formatting.
+// whitespace-delimited tokens, matching standard PGN export formatting. A
+// result marker ends the game it belongs to, so a file holding several
+// games back to back (each with its own tag pairs and movetext) yields just
+// the moves of the first one.
 fn tokenize(text: &str) -> Vec<String> {
-    text.split_whitespace()
-        .filter(|tok| !is_move_number(tok))
-        .filter(|tok| !matches!(*tok, "1-0" | "0-1" | "1/2-1/2" | "*"))
-        .map(|s| s.to_string())
-        .collect()
+    let mut moves = Vec::new();
+    for tok in text.split_whitespace() {
+        if is_move_number(tok) {
+            continue;
+        }
+        if matches!(tok, "1-0" | "0-1" | "1/2-1/2" | "*") {
+            break;
+        }
+        moves.push(tok.to_string());
+    }
+    moves
 }
 
 fn is_move_number(tok: &str) -> bool {
